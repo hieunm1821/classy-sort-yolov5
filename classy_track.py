@@ -33,28 +33,38 @@
     === end GNU License ===
 """
 
+import os
 # python interpreter searchs these subdirectories for modules
 import sys
-sys.path.insert(0, './yolov5')
-sys.path.insert(0, './sort')
+from pathlib import Path
+
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[0]  # YOLOv5 root directory
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))  # add ROOT to PATH
+if str(ROOT / 'yolov5') not in sys.path:
+    sys.path.append(str(ROOT / 'yolov5'))  # add  ROOT to PATH
+if str(ROOT / 'sort') not in sys.path:
+    sys.path.append(str(ROOT / 'sort'))  # add  ROOT to PATH
+ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
+
 
 import argparse
 import os
 import platform
 import shutil
 import time
-from pathlib import Path
+
 import cv2
-import torch
-import torch.backends.cudnn as cudnn
-
-#yolov5
-from yolov5.utils.datasets import LoadImages, LoadStreams
-from yolov5.utils.general import check_img_size, non_max_suppression, scale_coords
-from yolov5.utils.torch_utils import select_device, time_synchronized
-
 #SORT
 import skimage
+import torch
+import torch.backends.cudnn as cudnn
+#yolov5
+from utils.dataloaders import LoadImages, LoadStreams
+from utils.general import check_img_size, cv2, non_max_suppression, scale_boxes
+from utils.torch_utils import select_device
+
 from sort import *
 
 torch.set_printoptions(precision=3)
@@ -120,9 +130,8 @@ def detect(opt, *args):
     
     # Directory and CUDA settings for yolov5
     device = select_device(opt.device)
-    if os.path.exists(out):
-        shutil.rmtree(out)  # delete output folder
-    os.makedirs(out)  # make new output folder
+    if not os.path.exists(out):
+        os.makedirs(out)  # make new output folder
     half = device.type != 'cpu'  # half precision only supported on CUDA
 
     # Load yolov5 model
@@ -154,7 +163,7 @@ def detect(opt, *args):
     save_path = str(Path(out))
     txt_path = str(Path(out))+'/results.txt'
     
-    for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset): #for every frame
+    for frame_idx, (path, img, im0s, vid_cap, s) in enumerate(dataset): #for every frame
         img= torch.from_numpy(img).to(device)
         img = img.half() if half else img.float() #unint8 to fp16 or fp32
         img /= 255.0 #normalize to between 0 and 1.
@@ -162,14 +171,13 @@ def detect(opt, *args):
             img = img.unsqueeze(0)
             
         # Inference
-        t1 = time_synchronized()
+        t1 = time.time()
         pred = model(img, augment=opt.augment)[0] 
 
         # Apply NMS
         pred = non_max_suppression(
             pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
-        t2 = time_synchronized()
-        
+        t2 = time.time()
         # Process detections
         for i, det in enumerate(pred): #for each detection in this frame
             if webcam:  # batch_size >= 1
@@ -181,7 +189,7 @@ def detect(opt, *args):
             save_path = str(Path(out) / Path(p).name)
 
             # Rescale boxes from img_size (temporarily downscaled size) to im0 (native) size
-            det[:, :4] = scale_coords(
+            det[:, :4] = scale_boxes(
                 img.shape[2:], det[:, :4], im0.shape).round()
             
             for c in det[:, -1].unique(): #for each unique object category
@@ -267,7 +275,7 @@ if __name__ == '__main__':
                         default='inference/images', help='source')
     parser.add_argument('--output', type=str, default='inference/output',
                         help='output folder')  # output folder
-    parser.add_argument('--img-size', type=int, default=1080,
+    parser.add_argument('--img-size', type=int, default=640,
                         help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float,
                         default=0.3, help='object confidence threshold')
@@ -275,7 +283,7 @@ if __name__ == '__main__':
                         default=0.4, help='IOU threshold for NMS')
     parser.add_argument('--fourcc', type=str, default='mp4v',
                         help='output video codec (verify ffmpeg support)')
-    parser.add_argument('--device', default='',
+    parser.add_argument('--device', default='0',
                         help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--view-img', action='store_true',
                         help='display results')
@@ -284,14 +292,14 @@ if __name__ == '__main__':
     parser.add_argument('--save-txt', action='store_true',
                         help='save results to *.txt')
     parser.add_argument('--classes', nargs='+', type=int,
-                        default=[i for i in range(80)], help='filter by class') #80 classes in COCO dataset
+                        default=[i for i in range(1)], help='filter by class') #80 classes in COCO dataset
     parser.add_argument('--agnostic-nms', action='store_true',
                         help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true',
                         help='augmented inference')
     
     #SORT params
-    parser.add_argument('--sort-max-age', type=int, default=5,
+    parser.add_argument('--sort-max-age', type=int, default=10,
                         help='keep track of object even if object is occluded or not detected in n frames')
     parser.add_argument('--sort-min-hits', type=int, default=2,
                         help='start tracking only after n number of objects detected')
